@@ -6,10 +6,12 @@ const app  = express();
 const PORT = process.env.PORT || 8080;
 
 // ── Credentials ──
-const USER       = (process.env.DASHBOARD_USER || 'aerialfence').trim();
-const PASS       = (process.env.DASHBOARD_PASS || 'Harvest2024').trim();
 const ADMIN_USER = 'Admin';
 const ADMIN_PASS = 'Admin@123';
+
+// Runtime credentials — start from env vars, changeable by Admin at runtime
+let currentUser = (process.env.DASHBOARD_USER || 'aerialfence').trim();
+let currentPass = (process.env.DASHBOARD_PASS || 'Harvest2024').trim();
 
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: true, limit: '20mb' }));
@@ -110,8 +112,14 @@ app.post('/login', (req, res) => {
   console.log(`Login: "${u}" / "${p}"`);
 
   let isAdmin = false, allowed = false;
-  if      (u === ADMIN_USER && p === ADMIN_PASS) { allowed = true; isAdmin = true;  }
-  else if (u === USER       && p === PASS)       { allowed = true; isAdmin = false; }
+  if (u === 'Admin' && p === 'Admin@123') {
+    allowed = true; isAdmin = true;
+  } else if (u === currentUser && p === currentPass) {
+    allowed = true; isAdmin = false;
+  }
+  // Debug log so we can see in Railway what values are being compared
+  console.log(`Comparing: u="${u}" vs USER="${USER}", ADMIN="${ADMIN_USER}"`);
+  console.log(`Pass match: p vs PASS="${PASS}", ADMIN_PASS="${ADMIN_PASS}"`);
 
   console.log(`Result: allowed=${allowed} isAdmin=${isAdmin}`);
 
@@ -127,6 +135,8 @@ app.post('/login', (req, res) => {
 // ── Auth middleware ──
 function requireAuth(req, res, next) {
   if (req.path === '/login' || req.path === '/debug') return next();
+  // Allow session check without auth so dashboard knows who is logged in
+  if (req.path === '/api/session') return next();
   const session = getSession(req);
   if (session) { req.session = session; return next(); }
   if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'Unauthorized' });
@@ -144,7 +154,7 @@ app.get('/logout', (req, res) => {
 // ── API: session info ──
 app.get('/api/session', (req, res) => {
   const s = getSession(req);
-  if (!s) return res.json({ loggedIn: false });
+  if (!s) return res.json({ loggedIn: false, isAdmin: false });
   res.json({ loggedIn: true, username: s.username, isAdmin: s.isAdmin });
 });
 
@@ -173,9 +183,48 @@ app.delete('/api/theme-bgs/:theme', (req, res) => {
   res.json({ ok: true, theme });
 });
 
-// ── Static + catch-all ──
+
+// ── API: get credentials (admin only, password masked) ──
+app.get('/api/credentials', (req, res) => {
+  if (!req.session || !req.session.isAdmin) return res.status(403).json({ error: 'Admin only' });
+  res.json({ username: currentUser, passwordHint: currentPass.slice(0,2) + '****' });
+});
+
+// ── API: update credentials (admin only) ──
+app.post('/api/credentials', (req, res) => {
+  if (!req.session || !req.session.isAdmin) return res.status(403).json({ error: 'Admin only' });
+  const { username, password, confirmPassword } = req.body;
+  if (!username || username.trim().length < 3)
+    return res.status(400).json({ error: 'Username must be at least 3 characters' });
+  if (!password || password.length < 6)
+    return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  if (password !== confirmPassword)
+    return res.status(400).json({ error: 'Passwords do not match' });
+  if (username.trim().toLowerCase() === 'admin')
+    return res.status(400).json({ error: 'Cannot use Admin as username' });
+  currentUser = username.trim();
+  currentPass = password;
+  // Invalidate all regular user sessions
+  for (const [token, session] of sessions.entries()) {
+    if (!session.isAdmin) sessions.delete(token);
+  }
+  console.log('Admin updated credentials. New user: ' + currentUser);
+  res.json({ ok: true, username: currentUser });
+});
+
+// ── Mobile detection + static ──
 app.use(express.static(path.join(__dirname, 'public')));
-app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+
+app.get('*', (req, res) => {
+  const ua = req.headers['user-agent'] || '';
+  const isMobile = /Mobile|Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+  // Allow explicit override: ?view=desktop or ?view=mobile
+  const view = req.query.view;
+  if (view === 'mobile' || (isMobile && view !== 'desktop')) {
+    return res.sendFile(path.join(__dirname, 'public', 'mobile.html'));
+  }
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Drone Harvest Insights v4.0 on port ${PORT}`);
