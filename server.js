@@ -117,9 +117,8 @@ app.post('/login', (req, res) => {
   } else if (u === currentUser && p === currentPass) {
     allowed = true; isAdmin = false;
   }
-  // Debug log so we can see in Railway what values are being compared
-  console.log(`Comparing: u="${u}" vs USER="${USER}", ADMIN="${ADMIN_USER}"`);
-  console.log(`Pass match: p vs PASS="${PASS}", ADMIN_PASS="${ADMIN_PASS}"`);
+  // Debug log
+  console.log(`Comparing: u="${u}" vs currentUser="${currentUser}", ADMIN="${ADMIN_USER}"`);
 
   console.log(`Result: allowed=${allowed} isAdmin=${isAdmin}`);
 
