@@ -228,6 +228,6 @@ app.get('*', (req, res) => {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Drone Harvest Insights v4.0 on port ${PORT}`);
-  console.log(`   Regular user : ${USER}`);
+  console.log(`   Regular user : ${currentUser}`);
   console.log(`   Admin user   : ${ADMIN_USER}`);
 });
